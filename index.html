@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#0b0b0d" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Nyx</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #08080a;
+        --card: #141419;
+        --line: #26262e;
+        --text: #ececf1;
+        --muted: #8a8a94;
+        --accent: #7c5cff;
+        --live: #35d07f;
+      }
+      * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 26px;
+        padding: max(28px, env(safe-area-inset-top)) 22px max(28px, env(safe-area-inset-bottom));
+        background: radial-gradient(120% 90% at 50% 0%, #16121f 0%, var(--bg) 60%);
+        color: var(--text);
+        font: 16px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        overflow: hidden;
+        user-select: none;
+      }
+      h1 { margin: 0; font-size: 30px; font-weight: 650; letter-spacing: -0.02em; }
+      #state { color: var(--muted); font-size: 14px; min-height: 22px; text-align: center; max-width: 22rem; }
+      .dot {
+        display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+        background: var(--muted); margin-right: 9px; vertical-align: middle;
+        transition: background 0.2s ease, box-shadow 0.2s ease;
+      }
+      .dot[data-live="true"] { background: var(--live); box-shadow: 0 0 12px var(--live); }
+      button {
+        appearance: none; border: 1px solid var(--line); background: var(--card); color: var(--text);
+        font: inherit; font-weight: 650; padding: 22px 52px; border-radius: 999px; cursor: pointer;
+        transition: transform 0.08s ease, border-color 0.2s ease, opacity 0.2s ease;
+        min-width: 12rem;
+      }
+      button:active { transform: scale(0.97); }
+      button[data-live="true"] { border-color: var(--live); }
+      button:disabled { opacity: 0.4; cursor: default; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+      .row button { padding: 16px 30px; min-width: 8rem; font-size: 15px; }
+      #log {
+        width: 100%; max-width: 26rem; max-height: 20vh; overflow-y: auto;
+        font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+        color: var(--muted); border-top: 1px solid var(--line); padding-top: 12px;
+        white-space: pre-wrap; user-select: text;
+      }
+      .warn {
+        max-width: 26rem; border: 1px solid #5a3a1a; background: #1d1408; color: #e2b071;
+        border-radius: 12px; padding: 13px 15px; font-size: 13px; line-height: 1.45;
+      }
+      input {
+        width: 100%; max-width: 26rem; background: var(--card); border: 1px solid var(--line);
+        color: var(--text); font: 13px/1.4 ui-monospace, monospace; padding: 13px 15px; border-radius: 10px;
+        user-select: text;
+      }
+      #manual { display: none; flex-direction: column; gap: 10px; width: 100%; align-items: center; }
+      footer { color: #55555e; font-size: 11px; }
+    </style>
+  </head>
+  <body>
+    <h1>Nyx</h1>
+
+    <div id="warn"></div>
+
+    <div>
+      <span class="dot" id="dot"></span><span id="state">not connected</span>
+    </div>
+
+    <button id="join" type="button">Talk</button>
+
+    <div class="row">
+      <button id="mute" type="button" disabled>Mute</button>
+      <button id="leave" type="button" disabled>End</button>
+    </div>
+
+    <div id="manual">
+      <input id="tokenInput" type="text" placeholder="paste a join token" autocapitalize="off" autocorrect="off" spellcheck="false" />
+      <button id="connectManual" type="button">Connect</button>
+    </div>
+
+    <div id="log"></div>
+    <footer>nyx room · livekit + gemini live</footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
+    <script>
+      // The livekit URL is public information; only the join token is a credential.
+      // It arrives in the URL fragment (#t=...), which browsers never send to a
+      // server, so this file holds no secret and can be served from anywhere.
+      const LIVEKIT_URL = "wss://nyx-wjbvdcav.livekit.cloud";
+
+      const { Room, RoomEvent, Track } = LivekitClient;
+
+      const joinBtn = document.getElementById("join");
+      const muteBtn = document.getElementById("mute");
+      const leaveBtn = document.getElementById("leave");
+      const stateEl = document.getElementById("state");
+      const dotEl = document.getElementById("dot");
+      const logEl = document.getElementById("log");
+      const warnEl = document.getElementById("warn");
+      const manualEl = document.getElementById("manual");
+      const tokenInput = document.getElementById("tokenInput");
+
+      let room = null;
+      let muted = false;
+      let wakeLock = null;
+
+      const log = (message) => {
+        const stamp = new Date().toLocaleTimeString();
+        logEl.textContent += `[${stamp}] ${message}\n`;
+        logEl.scrollTop = logEl.scrollHeight;
+      };
+
+      const setState = (text, live) => {
+        stateEl.textContent = text;
+        dotEl.dataset.live = live ? "true" : "false";
+      };
+
+      const fragmentToken = () => {
+        const hash = new URLSearchParams(location.hash.replace(/^#/, ""));
+        return hash.get("t") || hash.get("token") || "";
+      };
+
+      async function keepAwake(on) {
+        try {
+          if (on && "wakeLock" in navigator && !wakeLock) {
+            wakeLock = await navigator.wakeLock.request("screen");
+            wakeLock.addEventListener("release", () => { wakeLock = null; });
+            log("screen will stay awake");
+          } else if (!on && wakeLock) {
+            await wakeLock.release();
+            wakeLock = null;
+          }
+        } catch (error) {
+          log(`wake lock: ${error.message || error}`);
+        }
+      }
+
+      async function join(token) {
+        if (!token) {
+          manualEl.style.display = "flex";
+          setState("no token in this link — paste one", false);
+          return;
+        }
+        joinBtn.disabled = true;
+        setState("connecting…", false);
+
+        try {
+          room = new Room({ adaptiveStream: true, dynacast: true });
+
+          room
+            .on(RoomEvent.TrackSubscribed, (track) => {
+              if (track.kind === Track.Kind.Audio) {
+                const audio = track.attach();
+                audio.autoplay = true;
+                audio.setAttribute("playsinline", "");
+                document.body.appendChild(audio);
+                log("agent audio attached");
+              }
+            })
+            .on(RoomEvent.ParticipantConnected, (p) => log(`joined: ${p.identity}`))
+            .on(RoomEvent.Disconnected, () => reset("disconnected"))
+            .on(RoomEvent.ConnectionStateChanged, (s) => log(`connection: ${s}`));
+
+          await room.connect(LIVEKIT_URL, token);
+          log("connected");
+
+          await room.localParticipant.setMicrophoneEnabled(true);
+          muted = false;
+          muteBtn.disabled = false;
+          leaveBtn.disabled = false;
+          joinBtn.textContent = "Connected";
+          joinBtn.dataset.live = "true";
+          setState("connected — say something", true);
+          await keepAwake(true);
+        } catch (error) {
+          setState("failed", false);
+          log(`error: ${error.message || error}`);
+          joinBtn.disabled = false;
+        }
+      }
+
+      async function leave() {
+        if (room) { await room.disconnect(); room = null; }
+        await keepAwake(false);
+        reset("left");
+      }
+
+      function reset(reason) {
+        setState("not connected", false);
+        joinBtn.textContent = "Talk";
+        joinBtn.disabled = false;
+        joinBtn.dataset.live = "false";
+        muteBtn.disabled = true;
+        leaveBtn.disabled = true;
+        log(reason);
+      }
+
+      async function toggleMute() {
+        if (!room) return;
+        muted = !muted;
+        await room.localParticipant.setMicrophoneEnabled(!muted);
+        muteBtn.textContent = muted ? "Unmute" : "Mute";
+        stateEl.textContent = muted ? "muted" : "connected — say something";
+      }
+
+      if (!window.isSecureContext) {
+        warnEl.className = "warn";
+        warnEl.textContent =
+          "This page is not on https, so the browser will refuse the microphone. Open it over https.";
+      }
+
+      joinBtn.onclick = () => join(fragmentToken() || tokenInput.value.trim());
+      muteBtn.onclick = toggleMute;
+      leaveBtn.onclick = leave;
+      document.getElementById("connectManual").onclick = () => join(tokenInput.value.trim());
+
+      if (fragmentToken()) {
+        setState("token ready — tap Talk", false);
+        log("token loaded from the link");
+      } else {
+        manualEl.style.display = "flex";
+        log("no token in the link; paste one above");
+      }
+    </script>
+  </body>
+</html>
