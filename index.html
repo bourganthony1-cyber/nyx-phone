@@ -99,7 +99,7 @@
     </div>
 
     <div id="log"></div>
-    <footer>nyx room · livekit + gemini live</footer>
+    <footer>just talk — nothing to hold</footer>
 
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
     <script>
@@ -156,7 +156,8 @@
             wakeLock = null;
           }
         } catch (error) {
-          log(`wake lock: ${error.message || error}`);
+          // A refused wake lock is not the user's problem: the screen may sleep, that's all.
+          
         }
       }
 
@@ -176,7 +177,7 @@
         audio.setAttribute("playsinline", "");
         audio.playsInline = true;
         document.body.appendChild(audio);
-        log("agent audio attached");
+        log("she is talking");
 
         try {
           const Ctor = window.AudioContext || window.webkitAudioContext;
@@ -188,9 +189,9 @@
           gain.gain.value = 1;
           source.connect(gain).connect(audioContext.destination);
           audio.muted = true;
-          log("audio routed to the loudspeaker (web audio)");
+          log("speaker on");
         } catch (error) {
-          log(`speaker route unavailable, using the element: ${error.message || error}`);
+          log("speaker route blocked — using the phone default");
           audio.muted = false;
         }
       }
@@ -211,12 +212,12 @@
             .on(RoomEvent.TrackSubscribed, (track) => {
               if (track.kind === Track.Kind.Audio) attachAudio(track);
             })
-            .on(RoomEvent.ParticipantConnected, (p) => log(`joined: ${p.identity}`))
+            .on(RoomEvent.ParticipantConnected, (p) => log("Nyx is in"))
             .on(RoomEvent.Disconnected, () => reset("disconnected"))
-            .on(RoomEvent.ConnectionStateChanged, (s) => log(`connection: ${s}`));
+            .on(RoomEvent.ConnectionStateChanged, (s) => { if (s === "disconnected") log("disconnected"); });
 
           await room.connect(LIVEKIT_URL, token);
-          log("connected");
+          log("connected to the room");
 
           await room.localParticipant.setMicrophoneEnabled(true);
           muted = false;
@@ -280,7 +281,7 @@
           setState("getting a token…", false);
           try {
             token = await fetchToken();
-            log(`token from the server (${token.length} chars)`);
+            log("ready — tap Talk");
           } catch (error) {
             setState("couldn't get a token", false);
             log(`error: ${error.message || error}`);
@@ -304,10 +305,10 @@
 
       if (fragmentToken()) {
         setState("token ready — tap Talk", false);
-        log("token loaded from the link");
+        log("ready — tap Talk");
       } else {
         setState("tap Talk — she picks up", false);
-        log("no token in the link; a fresh one is fetched when you tap");
+        log("tap Talk when you are ready");
       }
     </script>
   </body>
