@@ -186,7 +186,13 @@
           leaveBtn.disabled = false;
           joinBtn.textContent = "Connected";
           joinBtn.dataset.live = "true";
-          setState("connected — say something", true);
+          // Nothing to hold down. It used to read "Connected" while staying lit,
+          // which looks like a button waiting to be pressed — it got held for most
+          // of a call. Once you're in, the button goes away and the state line is
+          // the indicator; Mute and Leave stay for control.
+          joinBtn.disabled = true;
+          joinBtn.style.display = "none";
+          setState("● live — just talk, nothing to hold", true);
           await keepAwake(true);
         } catch (error) {
           setState("failed", false);
@@ -205,6 +211,7 @@
         setState("not connected", false);
         joinBtn.textContent = "Talk";
         joinBtn.disabled = false;
+        joinBtn.style.display = "";
         joinBtn.dataset.live = "false";
         muteBtn.disabled = true;
         leaveBtn.disabled = true;
@@ -216,7 +223,7 @@
         muted = !muted;
         await room.localParticipant.setMicrophoneEnabled(!muted);
         muteBtn.textContent = muted ? "Unmute" : "Mute";
-        stateEl.textContent = muted ? "muted" : "connected — say something";
+        stateEl.textContent = muted ? "muted — tap Unmute" : "● live — just talk, nothing to hold";
       }
 
       if (!window.isSecureContext) {
