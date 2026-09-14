@@ -100,9 +100,14 @@
     <script src="https://cdn.jsdelivr.net/npm/livekit-client/dist/livekit-client.umd.min.js"></script>
     <script>
       // The livekit URL is public information; only the join token is a credential.
-      // It arrives in the URL fragment (#t=...), which browsers never send to a
-      // server, so this file holds no secret and can be served from anywhere.
+      // Two ways in, in this order:
+      //   1. a token in the URL fragment (#t=...) — older links still work;
+      //   2. fetched from the token endpoint below, which mints one on demand.
+      // (2) is why this page no longer needs Tony's laptop awake to hand it a fresh
+      // link, and why the page URL itself is permanent. The key in the query string
+      // is not a credential: it only reaches a server that already holds the secret.
       const LIVEKIT_URL = "wss://nyx-wjbvdcav.livekit.cloud";
+      const TOKEN_ENDPOINT = "https://nyx-token.vercel.app/api/token?key=IP3x41SxsM46Sq9C5Xpwf86_mhneVc0l";
 
       const { Room, RoomEvent, Track } = LivekitClient;
 
@@ -226,13 +231,40 @@
         stateEl.textContent = muted ? "muted — tap Unmute" : "● live — just talk, nothing to hold";
       }
 
+      async function fetchToken() {
+        const response = await fetch(TOKEN_ENDPOINT, { cache: "no-store" });
+        if (!response.ok) throw new Error(`token server said ${response.status}`);
+        const data = await response.json();
+        if (!data.token) throw new Error("token server returned no token");
+        return data.token;
+      }
+
+      // Mint at the moment of the tap, not when the page loads: a page left open all
+      // evening would otherwise try to connect with a token that expired while it sat.
+      async function startFromTap() {
+        let token = fragmentToken() || tokenInput.value.trim();
+        if (!token) {
+          setState("getting a token…", false);
+          try {
+            token = await fetchToken();
+            log(`token from the server (${token.length} chars)`);
+          } catch (error) {
+            setState("couldn't get a token", false);
+            log(`error: ${error.message || error}`);
+            manualEl.style.display = "flex";
+            return;
+          }
+        }
+        await join(token);
+      }
+
       if (!window.isSecureContext) {
         warnEl.className = "warn";
         warnEl.textContent =
           "This page is not on https, so the browser will refuse the microphone. Open it over https.";
       }
 
-      joinBtn.onclick = () => join(fragmentToken() || tokenInput.value.trim());
+      joinBtn.onclick = startFromTap;
       muteBtn.onclick = toggleMute;
       leaveBtn.onclick = leave;
       document.getElementById("connectManual").onclick = () => join(tokenInput.value.trim());
@@ -241,8 +273,8 @@
         setState("token ready — tap Talk", false);
         log("token loaded from the link");
       } else {
-        manualEl.style.display = "flex";
-        log("no token in the link; paste one above");
+        setState("tap Talk — she picks up", false);
+        log("no token in the link; a fresh one is fetched when you tap");
       }
     </script>
   </body>
