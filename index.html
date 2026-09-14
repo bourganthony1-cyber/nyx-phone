@@ -160,6 +160,41 @@
         }
       }
 
+      // Remote audio, routed for a LOUDSPEAKER.
+      //
+      // On iOS (and some Android builds) the moment a mic is live the audio session
+      // becomes "play and record", and a plain <audio> element then plays out of the
+      // EARPIECE — which is exactly what "it won't go to speaker" is. The fix that
+      // actually works in a browser: hand the same track to Web Audio, whose output
+      // goes to the loudspeaker. The element stays as a fallback, muted so the two
+      // routes can't double up.
+      let audioContext = null;
+
+      async function attachAudio(track) {
+        const audio = track.attach();
+        audio.autoplay = true;
+        audio.setAttribute("playsinline", "");
+        audio.playsInline = true;
+        document.body.appendChild(audio);
+        log("agent audio attached");
+
+        try {
+          const Ctor = window.AudioContext || window.webkitAudioContext;
+          if (!Ctor || !track.mediaStreamTrack) return;
+          if (!audioContext) audioContext = new Ctor();
+          if (audioContext.state === "suspended") await audioContext.resume();
+          const source = audioContext.createMediaStreamSource(new MediaStream([track.mediaStreamTrack]));
+          const gain = audioContext.createGain();
+          gain.gain.value = 1;
+          source.connect(gain).connect(audioContext.destination);
+          audio.muted = true;
+          log("audio routed to the loudspeaker (web audio)");
+        } catch (error) {
+          log(`speaker route unavailable, using the element: ${error.message || error}`);
+          audio.muted = false;
+        }
+      }
+
       async function join(token) {
         if (!token) {
           manualEl.style.display = "flex";
@@ -174,13 +209,7 @@
 
           room
             .on(RoomEvent.TrackSubscribed, (track) => {
-              if (track.kind === Track.Kind.Audio) {
-                const audio = track.attach();
-                audio.autoplay = true;
-                audio.setAttribute("playsinline", "");
-                document.body.appendChild(audio);
-                log("agent audio attached");
-              }
+              if (track.kind === Track.Kind.Audio) attachAudio(track);
             })
             .on(RoomEvent.ParticipantConnected, (p) => log(`joined: ${p.identity}`))
             .on(RoomEvent.Disconnected, () => reset("disconnected"))
